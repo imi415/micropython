@@ -15,16 +15,24 @@ INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
 
-CFLAGS_CORTEX_M4 = -mthumb -mtune=cortex-m4 -mcpu=cortex-m4 -msoft-float -fsingle-precision-constant -Wdouble-promotion -Wfloat-conversion
-CFLAGS += $(INC) -Wall -Werror -std=c99 -nostdlib $(CFLAGS_CORTEX_M4) $(COPT)
-LDFLAGS += -nostdlib -T stm32f405.ld -Map=$@.map --cref --gc-sections
+# !! Use constants for now, will be shifted to board-specific ones.
+TARGET_CFLAGS_CPU = -mcpu=cortex-m33 -mthumb -mtune=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16
+TARGET_LDSCRIPT = MCXN947_cm33_core0_flash.ld
+
+CFLAGS += $(INC) -Wall -Werror -std=gnu99 -nostdlib $(TARGET_CFLAGS_CPU) $(COPT)
+
+# Floating point support
+CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
+CFLAGS += -fsingle-precision-constant
+
+LDFLAGS += -nostdlib -T $(TARGET_LDSCRIPT) -Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
 
 CSUPEROPT = -Os # save some code space
 
 # Tune for Debugging or Optimization
 CFLAGS += -g  # always include debug info in the ELF
 ifeq ($(DEBUG), 1)
-CFLAGS += -O0
+CFLAGS += -O0 -DDEBUG
 else
 CFLAGS += -Os -DNDEBUG
 CFLAGS += -fdata-sections -ffunction-sections
@@ -33,11 +41,12 @@ endif
 # Flags for optional C++ source code
 CXXFLAGS += $(filter-out -std=c99,$(CFLAGS))
 
-LIBS =
+LIBS = \
+	"$(shell $(CC) $(CFLAGS) -print-libgcc-file-name)"
 
 SRC_C = \
 	main.c \
-	uart_core.c \
+	mphalport.c \
 	shared/libc/printf.c \
 	shared/readline/readline.c \
 	shared/runtime/pyexec.c \
@@ -45,7 +54,24 @@ SRC_C = \
 	$(BUILD)/_frozen_mpy.c \
 
 # LibC sources
-SRC_LIBC_C = shared/libc/string0.c
+SRC_LIBC_C = \
+	shared/libc/string0.c
+
+# LibM sources
+SRC_LIBM_C = $(addprefix lib/libm/,\
+	atanf.c \
+	atan2f.c \
+	ef_rem_pio2.c \
+	fmodf.c \
+	kf_rem_pio2.c \
+	kf_sin.c \
+	kf_cos.c \
+	math.c \
+	sf_sin.c \
+	sf_cos.c \
+	)
+
+SRC_LIBM_C += lib/libm/thumb_vfp_sqrtf.c
 
 SRC_QSTR += \
 	shared/readline/readline.c \
@@ -54,9 +80,10 @@ SRC_QSTR += \
 OBJ += $(PY_CORE_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
+OBJ += $(addprefix $(BUILD)/, $(SRC_LIBC_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(SRC_LIBM_C:.c=.o))
 
 all: $(BUILD)/firmware.elf
-
 
 $(BUILD)/_frozen_mpy.c: $(TOP)/tests/frozen/frozentest.mpy $(BUILD)/genhdr/qstrdefs.generated.h
 	$(ECHO) "MISC freezing bytecode"
@@ -64,7 +91,7 @@ $(BUILD)/_frozen_mpy.c: $(TOP)/tests/frozen/frozentest.mpy $(BUILD)/genhdr/qstrd
 
 $(BUILD)/firmware.elf: $(OBJ)
 	$(ECHO) "LINK $@"
-	$(Q)$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	$(Q)$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 	$(Q)$(SIZE) $@
 
 $(BUILD)/firmware.bin: $(BUILD)/firmware.elf
