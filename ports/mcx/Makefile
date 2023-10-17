@@ -1,7 +1,24 @@
+# Determine which board we are compiling for...
+ifdef BOARD_DIR
+BOARD ?= $(notdir $(BOARD_DIR:/=))
+else
+BOARD ?= FRDM_MCXN947
+BOARD_DIR ?= boards/$(BOARD)
+endif
+
+ifeq ($(wildcard $(BOARD_DIR)/.),)
+	$(error Invalid BOARD specified: $(BOARD_DIR))
+endif
+
+BUILD ?= build-$(BOARD)
+GIT_SUBMODULES += lib/nxp_driver
+
 include ../../py/mkenv.mk
 
 # qstr definitions (must come before including py.mk)
 QSTR_DEFS = qstrdefsport.h
+
+include $(BOARD_DIR)/mpconfigboard.mk
 
 # MicroPython feature configurations
 MICROPY_ROM_TEXT_COMPRESSION ?= 1
@@ -9,23 +26,25 @@ MICROPY_ROM_TEXT_COMPRESSION ?= 1
 # include py core make definitions
 include $(TOP)/py/py.mk
 
+include mcx.mk
+
 CROSS_COMPILE ?= arm-none-eabi-
 
 INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
 
-# !! Use constants for now, will be shifted to board-specific ones.
-TARGET_CFLAGS_CPU = -mcpu=cortex-m33 -mthumb -mtune=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16
-TARGET_LDSCRIPT = MCXN947_cm33_core0_flash.ld
-
 CFLAGS += $(INC) -Wall -Werror -std=gnu99 -nostdlib $(TARGET_CFLAGS_CPU) $(COPT)
 
-# Floating point support
+# Configure floating point support
+ifeq ($(MICROPY_FLOAT_IMPL),single)
 CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
 CFLAGS += -fsingle-precision-constant
+else ifeq ($(MICROPY_FLOAT_IMPL),none)
+CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_NONE
+endif
 
-LDFLAGS += -nostdlib -T $(TARGET_LDSCRIPT) -Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
+LDFLAGS += -nostdlib $(addprefix -T,$(TARGET_MCU_LDS)) -Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
 
 CSUPEROPT = -Os # save some code space
 
@@ -37,6 +56,11 @@ else
 CFLAGS += -Os -DNDEBUG
 CFLAGS += -fdata-sections -ffunction-sections
 endif
+
+# Hardware & SDK C defines
+CFLAGS += \
+	-DCPU_$(TARGET_MCU_VARIANT) \
+	-DMCUXPRESSO_SDK
 
 # Flags for optional C++ source code
 CXXFLAGS += $(filter-out -std=c99,$(CFLAGS))
@@ -67,11 +91,16 @@ SRC_LIBM_C = $(addprefix lib/libm/,\
 	kf_sin.c \
 	kf_cos.c \
 	math.c \
+	nearbyintf.c \
 	sf_sin.c \
 	sf_cos.c \
 	)
 
+ifeq ($(SUPPORTS_HARDWARE_FP_SINGLE),1)
 SRC_LIBM_C += lib/libm/thumb_vfp_sqrtf.c
+else
+SRC_LIBM_C += lib/libm/ef_sqrt.c
+endif
 
 SRC_QSTR += \
 	shared/readline/readline.c \
