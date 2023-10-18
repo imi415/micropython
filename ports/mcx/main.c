@@ -14,6 +14,8 @@
 
 #include "extmod/vfs.h"
 
+#include "board.h"
+
 #if MICROPY_ENABLE_COMPILER
 void do_str(const char *src, mp_parse_input_kind_t input_kind) {
     nlr_buf_t nlr;
@@ -34,6 +36,8 @@ void do_str(const char *src, mp_parse_input_kind_t input_kind) {
 extern uint32_t __StackTop, __HeapBase, __HeapLimit;
 
 int main(int argc, char **argv) {
+    MCX_BoardEarlyInit();
+
     #if MICROPY_ENABLE_GC
     gc_init((void *)&__HeapBase, (void *)&__HeapLimit);
     #endif
@@ -88,65 +92,3 @@ void MP_WEAK __assert_func(const char *file, int line, const char *func, const c
     __fatal_error("Assertion failed");
 }
 #endif
-
-// this is a minimal IRQ and reset framework for any Cortex-M CPU
-
-extern uint32_t __etext, __data_start__, __data_end__, __bss_start__, __bss_end__;
-
-void Reset_Handler(void) __attribute__((naked));
-void Reset_Handler(void) {
-    // set stack pointer
-    __asm volatile ("ldr sp, =__StackTop");
-    // copy .data section from flash to RAM
-    for (uint32_t *src = &__etext, *dest = &__data_start__; dest < &__data_end__;) {
-        *dest++ = *src++;
-    }
-    // zero out .bss section
-    for (uint32_t *dest = &__bss_start__; dest < &__bss_end__;) {
-        *dest++ = 0;
-    }
-    // jump to board initialisation
-    void _start(void);
-    _start();
-}
-
-void Default_Handler(void) {
-    for (;;) {
-    }
-}
-
-const uint32_t isr_vector[] __attribute__((section(".isr_vector"))) = {
-    (uint32_t)&__StackTop,
-    (uint32_t)&Reset_Handler,
-    (uint32_t)&Default_Handler, // NMI_Handler
-    (uint32_t)&Default_Handler, // HardFault_Handler
-    (uint32_t)&Default_Handler, // MemManage_Handler
-    (uint32_t)&Default_Handler, // BusFault_Handler
-    (uint32_t)&Default_Handler, // UsageFault_Handler
-    0,
-    0,
-    0,
-    0,
-    (uint32_t)&Default_Handler, // SVC_Handler
-    (uint32_t)&Default_Handler, // DebugMon_Handler
-    0,
-    (uint32_t)&Default_Handler, // PendSV_Handler
-    (uint32_t)&Default_Handler, // SysTick_Handler
-};
-
-void _start(void) {
-    // when we get here: stack is initialised, bss is clear, data is copied
-
-    // SCB->CCR: enable 8-byte stack alignment for IRQ handlers, in accord with EABI
-    *((volatile uint32_t *)0xe000ed14) |= 1 << 9;
-
-    // Do Board_InitBootxxx here.
-
-    // now that we have a basic system up and running we can call main
-    main(0, NULL);
-
-    // we must not return
-    for (;;) {
-    }
-}
-

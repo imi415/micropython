@@ -50,13 +50,18 @@ else ifeq ($(MICROPY_FLOAT_IMPL),none)
 CFLAGS += -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_NONE
 endif
 
-LDFLAGS += -nostdlib $(addprefix -T,$(TARGET_MCU_LDS)) -Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
+LDFLAGS += -nostdlib \
+	$(addprefix -T,devices/$(TARGET_MCU_SERIES)/$(TARGET_MCU_VARIANT)_flash.ld) \
+	-Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
 
 CSUPEROPT = -Os # save some code space
 
 # SDK
 SDK_DIR = lib/nxp_driver/sdk
 MCUX_DIR = $(SDK_DIR)/devices/$(TARGET_MCU_SERIES)
+
+TARGET_STARTUP_S = devices/$(TARGET_MCU_SERIES)/startup_$(TARGET_MCU_VARIANT)
+TARGET_SYSTEM_C = devices/$(TARGET_MCU_SERIES)/system_$(TARGET_MCU_VARIANT)
 
 # Tune for Debugging or Optimization
 CFLAGS += -g  # always include debug info in the ELF
@@ -69,8 +74,10 @@ endif
 
 # Hardware & SDK C defines
 CFLAGS += \
-	-DCPU_$(TARGET_MCU_VARIANT) \
-	-DMCUXPRESSO_SDK
+	-D__START=main \
+	-D$(TARGET_MCU_DEF) \
+	-DMCUXPRESSO_SDK \
+	-D__STARTUP_CLEAR_BSS
 
 # Hardware & SDK C includes
 CFLAGS += \
@@ -90,10 +97,29 @@ SRC_C = \
 	mphalport.c \
 	hal_systick.c \
 
-SRC_SDK_C = $(addprefix $(MCUX_DIR)/,\
-		drivers/fsl_common.c \
-		drivers/fsl_common_arm.c \
+SRC_BOARD_C = $(addprefix $(BOARD_DIR)/, \
+	board.c \
+	clock_config.c \
+	pin_mux.c \
 	)
+
+SRC_SDK_C = $(addprefix $(MCUX_DIR)/,\
+	drivers/fsl_clock.c \
+	drivers/fsl_common.c \
+	drivers/fsl_common_arm.c \
+	drivers/fsl_lpi2c.c \
+	drivers/fsl_lpspi.c \
+	drivers/fsl_lpuart.c \
+	drivers/fsl_power.c \
+	drivers/fsl_reset.c \
+	)
+
+SRC_C += $(TARGET_SYSTEM_C).c
+SRC_O += $(TARGET_STARTUP_S).o
+
+ifeq ($(TARGET_MCU_HAS_LPFLEXCOMM), 1)
+SRC_SDK_C += $(MCUX_DIR)/drivers/fsl_lpflexcomm.c
+endif
 
 SRC_SHARED_C = $(addprefix shared/,\
 	libc/printf.c \
@@ -152,6 +178,7 @@ SRC_QSTR += $(SRC_SHARED_C)
 OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_O))
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(SRC_BOARD_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_SDK_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_SHARED_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
@@ -165,16 +192,14 @@ $(BUILD)/shared/runtime/gchelper_thumb2.o: $(TOP)/shared/runtime/gchelper_thumb2
 	$(ECHO) "AS $<"
 	$(Q)$(AS) $(ASFLAGS) -o $@ $<
 
-$(BUILD)/_frozen_mpy.c: $(TOP)/tests/frozen/frozentest.mpy $(BUILD)/genhdr/qstrdefs.generated.h
-	$(ECHO) "MISC freezing bytecode"
-	$(Q)$(TOP)/tools/mpy-tool.py -f -q $(BUILD)/genhdr/qstrdefs.preprocessed.h -mlongint-impl=none $< > $@
+# Startup file requires CPP support.
+$(BUILD)/$(TARGET_STARTUP_S).o: $(TARGET_STARTUP_S).S
+	$(ECHO) "AS $<"
+	$(Q)$(CC) $(CFLAGS) -c -xassembler-with-cpp -o $@ $<
 
 $(BUILD)/firmware.elf: $(OBJ)
 	$(ECHO) "LINK $@"
 	$(Q)$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 	$(Q)$(SIZE) $@
-
-$(BUILD)/firmware.bin: $(BUILD)/firmware.elf
-	$(Q)$(OBJCOPY) -O binary -j .isr_vector -j .text -j .data $^ $(BUILD)/firmware.bin
 
 include $(TOP)/py/mkrules.mk
