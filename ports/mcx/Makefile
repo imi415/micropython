@@ -23,8 +23,12 @@ include $(BOARD_DIR)/mpconfigboard.mk
 # MicroPython feature configurations
 MICROPY_ROM_TEXT_COMPRESSION ?= 1
 
+# File containing description of content to be frozen into firmware.
+FROZEN_MANIFEST ?= boards/manifest.py
+
 # include py core make definitions
 include $(TOP)/py/py.mk
+include $(TOP)/extmod/extmod.mk
 
 include mcx.mk
 
@@ -35,6 +39,8 @@ INC += -I$(TOP)
 INC += -I$(BUILD)
 
 CFLAGS += $(INC) -Wall -Werror -std=gnu99 -nostdlib $(TARGET_CFLAGS_CPU) $(COPT)
+
+ASFLAGS += $(TARGET_CFLAGS_CPU)
 
 # Configure floating point support
 ifeq ($(MICROPY_FLOAT_IMPL),single)
@@ -47,6 +53,10 @@ endif
 LDFLAGS += -nostdlib $(addprefix -T,$(TARGET_MCU_LDS)) -Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
 
 CSUPEROPT = -Os # save some code space
+
+# SDK
+SDK_DIR = lib/nxp_driver/sdk
+MCUX_DIR = $(SDK_DIR)/devices/$(TARGET_MCU_SERIES)
 
 # Tune for Debugging or Optimization
 CFLAGS += -g  # always include debug info in the ELF
@@ -62,6 +72,13 @@ CFLAGS += \
 	-DCPU_$(TARGET_MCU_VARIANT) \
 	-DMCUXPRESSO_SDK
 
+# Hardware & SDK C includes
+CFLAGS += \
+	-I$(BOARD_DIR) \
+	-I$(TOP)/$(SDK_DIR)/CMSIS/Include \
+	-I$(TOP)/$(MCUX_DIR) \
+	-I$(TOP)/$(MCUX_DIR)/drivers
+
 # Flags for optional C++ source code
 CXXFLAGS += $(filter-out -std=c99,$(CFLAGS))
 
@@ -71,11 +88,21 @@ LIBS = \
 SRC_C = \
 	main.c \
 	mphalport.c \
-	shared/libc/printf.c \
-	shared/readline/readline.c \
-	shared/runtime/pyexec.c \
-	shared/runtime/stdout_helpers.c \
-	$(BUILD)/_frozen_mpy.c \
+	hal_systick.c \
+
+SRC_SDK_C = $(addprefix $(MCUX_DIR)/,\
+		drivers/fsl_common.c \
+		drivers/fsl_common_arm.c \
+	)
+
+SRC_SHARED_C = $(addprefix shared/,\
+	libc/printf.c \
+	readline/readline.c \
+	runtime/gchelper_native.c \
+	runtime/pyexec.c \
+	runtime/stdout_helpers.c \
+	runtime/sys_stdio_mphal.c \
+	)
 
 # LibC sources
 SRC_LIBC_C = \
@@ -83,17 +110,32 @@ SRC_LIBC_C = \
 
 # LibM sources
 SRC_LIBM_C = $(addprefix lib/libm/,\
-	atanf.c \
+	acoshf.c \
+	asinfacosf.c \
+	asinhf.c \
 	atan2f.c \
+	atanf.c \
+	atanhf.c \
 	ef_rem_pio2.c \
+	erf_lgamma.c \
 	fmodf.c \
+	kf_cos.c \
 	kf_rem_pio2.c \
 	kf_sin.c \
-	kf_cos.c \
+	kf_tan.c \
+	log1pf.c \
 	math.c \
 	nearbyintf.c \
-	sf_sin.c \
+	roundf.c \
 	sf_cos.c \
+	sf_erf.c \
+	sf_frexp.c \
+	sf_ldexp.c \
+	sf_modf.c \
+	sf_sin.c \
+	sf_tan.c \
+	wf_lgamma.c \
+	wf_tgamma.c \
 	)
 
 ifeq ($(SUPPORTS_HARDWARE_FP_SINGLE),1)
@@ -102,17 +144,26 @@ else
 SRC_LIBM_C += lib/libm/ef_sqrt.c
 endif
 
-SRC_QSTR += \
-	shared/readline/readline.c \
-	shared/runtime/pyexec.c \
+SRC_O += \
+	shared/runtime/gchelper_thumb2.o
 
-OBJ += $(PY_CORE_O)
+SRC_QSTR += $(SRC_SHARED_C)
+
+OBJ += $(PY_O)
+OBJ += $(addprefix $(BUILD)/, $(SRC_O))
 OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(SRC_SDK_C:.c=.o))
+OBJ += $(addprefix $(BUILD)/, $(SRC_SHARED_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_LIBC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_LIBM_C:.c=.o))
 
 all: $(BUILD)/firmware.elf
+
+# Need correct CPU flags to assemble this file.
+$(BUILD)/shared/runtime/gchelper_thumb2.o: $(TOP)/shared/runtime/gchelper_thumb2.s
+	$(ECHO) "AS $<"
+	$(Q)$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD)/_frozen_mpy.c: $(TOP)/tests/frozen/frozentest.mpy $(BUILD)/genhdr/qstrdefs.generated.h
 	$(ECHO) "MISC freezing bytecode"

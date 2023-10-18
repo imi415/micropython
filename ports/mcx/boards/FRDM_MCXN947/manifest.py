@@ -1,1 +1,1 @@
-include("../manifest.py")
+include("$(BOARD_DIR)/manifest.py")

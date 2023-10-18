@@ -8,7 +8,11 @@
 #include "py/repl.h"
 #include "py/gc.h"
 #include "py/mperrno.h"
+#include "shared/readline/readline.h"
+#include "shared/runtime/gchelper.h"
 #include "shared/runtime/pyexec.h"
+
+#include "extmod/vfs.h"
 
 #if MICROPY_ENABLE_COMPILER
 void do_str(const char *src, mp_parse_input_kind_t input_kind) {
@@ -27,19 +31,15 @@ void do_str(const char *src, mp_parse_input_kind_t input_kind) {
 }
 #endif
 
-static char *stack_top;
-#if MICROPY_ENABLE_GC
-static char heap[MICROPY_HEAP_SIZE];
-#endif
+extern uint32_t __StackTop, __HeapBase, __HeapLimit;
 
 int main(int argc, char **argv) {
-    int stack_dummy;
-    stack_top = (char *)&stack_dummy;
-
     #if MICROPY_ENABLE_GC
-    gc_init(heap, heap + sizeof(heap));
+    gc_init((void *)&__HeapBase, (void *)&__HeapLimit);
     #endif
     mp_init();
+    readline_init0();
+
     #if MICROPY_ENABLE_COMPILER
     #if MICROPY_REPL_EVENT_DRIVEN
     pyexec_event_repl_init();
@@ -63,23 +63,12 @@ int main(int argc, char **argv) {
 
 #if MICROPY_ENABLE_GC
 void gc_collect(void) {
-    // WARNING: This gc_collect implementation doesn't try to get root
-    // pointers from CPU registers, and thus may function incorrectly.
-    void *dummy;
     gc_collect_start();
-    gc_collect_root(&dummy, ((mp_uint_t)stack_top - (mp_uint_t)&dummy) / sizeof(mp_uint_t));
+    gc_helper_collect_regs_and_stack();
     gc_collect_end();
     gc_dump_info(&mp_plat_print);
 }
 #endif
-
-mp_lexer_t *mp_lexer_new_from_file(qstr filename) {
-    mp_raise_OSError(MP_ENOENT);
-}
-
-mp_import_stat_t mp_import_stat(const char *path) {
-    return MP_IMPORT_STAT_NO_EXIST;
-}
 
 void nlr_jump_fail(void *val) {
     while (1) {
@@ -102,7 +91,7 @@ void MP_WEAK __assert_func(const char *file, int line, const char *func, const c
 
 // this is a minimal IRQ and reset framework for any Cortex-M CPU
 
-extern uint32_t __StackTop, __etext, __data_start__, __data_end__, __bss_start__, __bss_end__;
+extern uint32_t __etext, __data_start__, __data_end__, __bss_start__, __bss_end__;
 
 void Reset_Handler(void) __attribute__((naked));
 void Reset_Handler(void) {
