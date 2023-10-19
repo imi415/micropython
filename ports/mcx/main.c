@@ -4,9 +4,10 @@
 
 #include "py/builtin.h"
 #include "py/compile.h"
+#include "py/gc.h"
 #include "py/runtime.h"
 #include "py/repl.h"
-#include "py/gc.h"
+#include "py/stackctrl.h"
 #include "py/mperrno.h"
 #include "shared/readline/readline.h"
 #include "shared/runtime/gchelper.h"
@@ -14,7 +15,11 @@
 
 #include "extmod/vfs.h"
 
+#include "drv_uart.h"
+
 #include "board.h"
+
+STATIC drv_uart_t s_stdio_uart_obj;
 
 #if MICROPY_ENABLE_COMPILER
 void do_str(const char *src, mp_parse_input_kind_t input_kind) {
@@ -33,46 +38,43 @@ void do_str(const char *src, mp_parse_input_kind_t input_kind) {
 }
 #endif
 
-extern uint32_t __StackTop, __HeapBase, __HeapLimit;
+extern uint32_t __StackTop, __StackLimit, __HeapBase, __HeapLimit;
 
 int main(int argc, char **argv) {
     MCX_BoardEarlyInit();
 
-    #if MICROPY_ENABLE_GC
+    mp_stack_set_top(&__StackTop);
+    mp_stack_set_limit((char *)&__StackTop - (char *)&__StackLimit - 1024);
+
     gc_init((void *)&__HeapBase, (void *)&__HeapLimit);
-    #endif
+
     mp_init();
     readline_init0();
 
-    #if MICROPY_ENABLE_COMPILER
-    #if MICROPY_REPL_EVENT_DRIVEN
-    pyexec_event_repl_init();
-    for (;;) {
-        int c = mp_hal_stdin_rx_chr();
-        if (pyexec_event_repl_process_char(c)) {
-            break;
-        }
-    }
-    #else
+    MP_STATE_PORT(stdio_uart) = &s_stdio_uart_obj;
+    drv_uart_config_t uart_cfg = {
+        .baud_rate = 115200,
+        .data_bits = DRV_Uart8DataBits,
+        .stop_bits = DRV_Uart1StopBits,
+        .parity = DRV_UartNoParity,
+    };
+
+    drv_uart_init(&s_stdio_uart_obj, 4, &uart_cfg);
+
     pyexec_friendly_repl();
-    #endif
-    // do_str("print('hello world!', list(x+1 for x in range(10)), end='eol\\n')", MP_PARSE_SINGLE_INPUT);
-    // do_str("for i in range(10):\r\n  print(i)", MP_PARSE_FILE_INPUT);
-    #else
-    pyexec_frozen_module("frozentest.py", false);
-    #endif
+
+
+
     mp_deinit();
     return 0;
 }
 
-#if MICROPY_ENABLE_GC
 void gc_collect(void) {
     gc_collect_start();
     gc_helper_collect_regs_and_stack();
     gc_collect_end();
     gc_dump_info(&mp_plat_print);
 }
-#endif
 
 void nlr_jump_fail(void *val) {
     while (1) {

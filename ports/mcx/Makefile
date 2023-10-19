@@ -54,6 +54,14 @@ LDFLAGS += -nostdlib \
 	$(addprefix -T,devices/$(TARGET_MCU_SERIES)/$(TARGET_MCU_VARIANT)_flash.ld) \
 	-Wl,-Map=$(@:.elf=.map) -Wl,--cref -Wl,--gc-sections
 
+ifneq ($(TARGET_STACK_SIZE),)
+LDFLAGS += -Wl,--defsym=__stack_size__=$(TARGET_STACK_SIZE)
+endif
+
+ifneq ($(TARGET_HEAP_SIZE),)
+LDFLAGS += -Wl,--defsym=__heap_size__=$(TARGET_HEAP_SIZE)
+endif
+
 CSUPEROPT = -Os # save some code space
 
 # SDK
@@ -96,6 +104,7 @@ SRC_C = \
 	main.c \
 	mphalport.c \
 	hal_systick.c \
+	drv_uart.c \
 
 SRC_BOARD_C = $(addprefix $(BOARD_DIR)/, \
 	board.c \
@@ -173,7 +182,7 @@ endif
 SRC_O += \
 	shared/runtime/gchelper_thumb2.o
 
-SRC_QSTR += $(SRC_SHARED_C)
+SRC_QSTR += $(SRC_C) $(SRC_SHARED_C)
 
 OBJ += $(PY_O)
 OBJ += $(addprefix $(BUILD)/, $(SRC_O))
