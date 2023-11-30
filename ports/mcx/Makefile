@@ -103,12 +103,13 @@ LIBS = \
 SRC_C = \
 	main.c \
 	mphalport.c \
-	hal_systick.c \
 	drv_uart.c \
+	systick.c \
 
 SRC_BOARD_C = $(addprefix $(BOARD_DIR)/, \
 	board.c \
 	clock_config.c \
+	interrupts.c \
 	pin_mux.c \
 	)
 
@@ -128,6 +129,12 @@ SRC_O += $(TARGET_STARTUP_S).o
 
 ifeq ($(TARGET_MCU_HAS_LPFLEXCOMM), 1)
 SRC_SDK_C += $(MCUX_DIR)/drivers/fsl_lpflexcomm.c
+CFLAGS += -DMICROPY_HW_HAS_LPFLEXCOMM
+endif
+
+ifeq ($(TARGET_MCU_HAS_OSTIMER), 1)
+SRC_SDK_C += $(MCUX_DIR)/drivers/fsl_ostimer.c
+CFLAGS += -DMICROPY_HW_HAS_OSTIMER
 endif
 
 SRC_SHARED_C = $(addprefix shared/,\

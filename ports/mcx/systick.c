@@ -1,9 +1,8 @@
 #include "py/runtime.h"
 #include "py/mphal.h"
 
-void mp_hal_systick_init(void) {
-
-}
+#include "fsl_common.h"
+#include "fsl_common_arm.h"
 
 void mp_hal_delay_ms(mp_uint_t ms) {
 
@@ -19,4 +18,8 @@ mp_uint_t mp_hal_ticks_us(void) {
 
 mp_uint_t mp_hal_ticks_cpu(void) {
     return 0;
+}
+
+void SysTick_Handler(void) {
+
 }

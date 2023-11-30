@@ -6,12 +6,12 @@
 #include "drv_uart.h"
 
 int drv_uart_init(drv_uart_t *uart, uint8_t id, drv_uart_config_t *cfg) {
-    uart->instance = MCX_BoardGetUARTInstanceById(id);
+    uart->instance = MCX_BoardGetUARTInstance(id);
     if(uart->instance == NULL) {
         return -1;
     }
 
-    int uart_inputfreq = MCX_BoardConfigureUARTClock(uart->instance);
+    int uart_inputfreq = MCX_BoardConfigureUARTClock(id);
     if(uart_inputfreq <= 0) {
         return -2;
     }
